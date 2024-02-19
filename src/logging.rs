@@ -1,4 +1,4 @@
-// use lazy_static::lazy_static;
+use std::sync::OnceLock;
 
 pub fn into_log_string(buffer: &[u8]) -> String {
     return String::from_utf8_lossy(buffer)
@@ -8,21 +8,24 @@ pub fn into_log_string(buffer: &[u8]) -> String {
         .replace('\0', "\\0");
 }
 
-//TODO: get from env
-// lazy_static! {
-//     pub static ref ENABLE_LOG: bool = match std::env::var("ENABLE_LOG") {
-//         Ok(val) => val == "true" || val == "1",
-//         Err(_) => false,
-//     };
-// }
-pub const ENABLE_LOG: bool = false;
+pub fn get_enable_log() -> &'static bool {
+    static INIT: OnceLock<bool> = OnceLock::new();
+    return INIT.get_or_init(|| {
+        return match std::env::var("ENABLE_LOG") {
+            Ok(val) => val == "true" || val == "1",
+            Err(_) => false,
+        };
+    });
+}
+
+// pub const ENABLE_LOG: bool = false;
 
 macro_rules! log {
-        ($($arg:tt)*) => {
-            if crate::logging::ENABLE_LOG {
-                println!($($arg)*);
-            }
-        };
-    }
+    ($($arg:expr),*) => {
+        if *crate::logging::get_enable_log() {
+            println!($($arg),*);
+        }
+    };
+}
 
 pub(crate) use log;

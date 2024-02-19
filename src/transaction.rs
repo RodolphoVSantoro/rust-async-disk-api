@@ -30,7 +30,6 @@ struct PostTransactionResponse {
 
 impl Default for Transaction {
     fn default() -> Self {
-        logging::log!();
         return Transaction {
             valor: 0,
             descricao: String::new(),
