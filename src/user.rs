@@ -18,18 +18,25 @@ pub enum TransactionResult {
 
 impl User {
     pub fn compute_transaction(&mut self, transaction: &Transaction) -> TransactionResult {
-        if transaction.descricao.len() > 10 || transaction.descricao.len() < 1 {
+        if transaction.descricao.len() > 10 || transaction.descricao.is_empty() {
             return TransactionResult::InvalidTransactionType;
         }
 
-        let int_transaction_value = transaction.valor as i32;
+        let int_transaction_value: i32 = transaction
+            .valor
+            .try_into()
+            .expect("failed to convert transaction.valor to i32");
         match transaction.tipo.as_str() {
             "c" => {
                 self.total += int_transaction_value;
                 return TransactionResult::Ok;
             }
             "d" => {
-                if self.total - int_transaction_value < -(self.limit as i32) {
+                let limit: i32 = self
+                    .limit
+                    .try_into()
+                    .expect("failed to convert limit to i32");
+                if self.total - int_transaction_value < -limit {
                     return TransactionResult::LimitExceeded;
                 }
                 self.total -= int_transaction_value;
@@ -46,24 +53,41 @@ impl User {
             realizada_em: transaction.realizada_em.clone(),
         };
         if self.n_transactions < 10 {
-            self.transactions[self.n_transactions as usize] = copy_transaction;
+            let index: usize = self
+                .n_transactions
+                .try_into()
+                .expect("failed to convert n_transactions to usize");
+            self.transactions[index] = copy_transaction;
             self.n_transactions += 1;
-            self.last_transaction = self.n_transactions;
+            self.last_transaction = self.n_transactions % 10;
             return;
         }
+        let index: usize = self
+            .last_transaction
+            .try_into()
+            .expect("failed to convert n_transactions to usize");
+        self.transactions[index] = copy_transaction;
         self.last_transaction = (self.last_transaction + 1) % 10;
-        self.transactions[self.last_transaction as usize] = copy_transaction;
     }
     pub fn get_ordered_transactions(&self) -> Vec<&Transaction> {
         if self.n_transactions == 0 {
             return Vec::new();
         }
         let mut ordered_transactions = Vec::new();
-        let mut i = self.last_transaction as i32;
-        i = (i - 1 + self.n_transactions as i32) % self.n_transactions as i32;
-        for _ in 0..self.n_transactions {
-            ordered_transactions.push(&self.transactions[i as usize]);
-            i = (i - 1 + self.n_transactions as i32) % self.n_transactions as i32;
+        let n_transactions: i32 = self
+            .n_transactions
+            .try_into()
+            .expect("failed to convert n_transactions to i32");
+        let mut i: i32 = self
+            .last_transaction
+            .try_into()
+            .expect("failed to convert last_transaction to i32");
+
+        i = (i - 1 + n_transactions) % n_transactions;
+        for _ in 0..n_transactions {
+            let index: usize = i.try_into().expect("failed to convert i to i32");
+            ordered_transactions.push(&self.transactions[index]);
+            i = (i - 1 + n_transactions) % n_transactions;
         }
         return ordered_transactions;
     }
