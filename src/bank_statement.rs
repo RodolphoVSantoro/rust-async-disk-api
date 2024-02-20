@@ -11,7 +11,8 @@ struct StatementResponseSaldo {
 #[derive(Serialize, Debug)]
 pub struct StatementResponse<'a> {
     saldo: StatementResponseSaldo,
-    ultimas_transacoes: Vec<&'a Transaction>,
+    #[serde(serialize_with = "serialize_transactions")]
+    ultimas_transacoes: [Option<&'a Transaction>; 10],
 }
 
 pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
@@ -37,6 +38,8 @@ pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
 
     let current_datetime = chrono::Local::now();
     let formatted_datetime = current_datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+    let mut ordered_transactions: [Option<&Transaction>; 10] = [None; 10];
+    user.get_ordered_transactions(&mut ordered_transactions);
 
     let statement_response = StatementResponse {
         saldo: StatementResponseSaldo {
@@ -44,7 +47,7 @@ pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
             data_extrato: formatted_datetime,
             limite: user.limit,
         },
-        ultimas_transacoes: user.get_ordered_transactions(),
+        ultimas_transacoes: ordered_transactions,
     };
 
     let serialize_result = serde_json::to_string(&statement_response);
@@ -67,4 +70,12 @@ fn get_id(buffer: &[u8]) -> Option<u32> {
     let id = u32::from(maybe_id);
     let zero_ascii = u32::from(b'0');
     return Some(id - zero_ascii);
+}
+
+fn serialize_transactions<S>(v: &[Option<&Transaction>; 10], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let i = v.iter().position(|x| x.is_none()).unwrap_or(v.len());
+    return v[0..i].serialize(s);
 }

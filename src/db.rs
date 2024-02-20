@@ -42,10 +42,15 @@ pub fn read_user(id: u32) -> ReadUserResult {
     let file_path = format!("data/user{}.bin", id);
     let file = match File::open(file_path) {
         Ok(file) => file,
-        Err(e) => {
-            logging::log!("Error opening file: {}", e);
-            return ReadUserResult::NotFound;
-        }
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                return ReadUserResult::NotFound;
+            }
+            _ => {
+                let error_string = format!("Error opening file: {}", e);
+                return ReadUserResult::InternalError(error_string);
+            }
+        },
     };
     match file.lock_shared() {
         Ok(()) => {}

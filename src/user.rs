@@ -73,11 +73,13 @@ impl User {
         self.transactions[index] = copy_transaction;
         self.last_transaction = (self.last_transaction + 1) % 10;
     }
-    pub fn get_ordered_transactions(&self) -> Vec<&Transaction> {
+    pub fn get_ordered_transactions<'a>(
+        &'a self,
+        ordered_transactions: &mut [Option<&'a Transaction>; 10],
+    ) {
         if self.n_transactions == 0 {
-            return Vec::new();
+            return;
         }
-        let mut ordered_transactions = Vec::new();
         let n_transactions: i32 = self
             .n_transactions
             .try_into()
@@ -88,11 +90,12 @@ impl User {
             .expect("failed to convert last_transaction to i32");
 
         i = (i - 1 + n_transactions) % n_transactions;
-        for _ in 0..n_transactions {
-            let index: usize = i.try_into().expect("failed to convert i to i32");
-            ordered_transactions.push(&self.transactions[index]);
+        for j in 0..n_transactions {
+            let index_i: usize = i.try_into().expect("failed to convert i to i32");
+            let index_j: usize = j.try_into().expect("failed to convert j to i32");
+
+            ordered_transactions[index_j] = Some(&self.transactions[index_i]);
             i = (i - 1 + n_transactions) % n_transactions;
         }
-        return ordered_transactions;
     }
 }

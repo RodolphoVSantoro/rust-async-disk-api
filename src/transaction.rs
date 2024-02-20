@@ -139,14 +139,14 @@ fn get_body(buffer: &[u8]) -> Option<TransactionRequest> {
         }
     };
     logging::log!("Body start: {}", body_start);
-    let mut body_end = match buffer.iter().position(|&x| return x == b'}') {
+    let mut body_end = match buffer[body_start..].iter().position(|&x| return x == b'}') {
         Some(index) => index,
         None => {
             logging::log!("Failed to find end of json");
             return None;
         }
     };
-    body_end += 1;
+    body_end = body_end + body_start + 1;
     logging::log!("Body end: {}", body_end);
 
     let transaction =
