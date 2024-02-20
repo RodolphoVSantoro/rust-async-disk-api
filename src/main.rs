@@ -8,14 +8,12 @@
 mod bank_statement;
 mod db;
 mod logging;
-mod static_responses;
+mod responses;
 mod transaction;
 mod user;
 
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-};
+use responses::ResponseType;
+use tokio::{io::AsyncReadExt, net::TcpListener};
 
 #[tokio::main]
 async fn main() {
@@ -30,34 +28,36 @@ async fn main() {
         .expect(format!("Failed to bind to address {port}").as_str());
     logging::log!("Listening for connections on port {port}");
 
-    while let Ok((stream, _)) = listener.accept().await {
+    while let Ok((mut stream, _)) = listener.accept().await {
         tokio::spawn(async move {
-            let conn = handle_connection_async(stream).await;
-            if let Err(e) = conn {
-                logging::log!("An error occurred while handling connection: {}", e);
-            }
+            let buffer = &mut [0; 512];
+            let read_result = stream.read(buffer).await;
+            let request_size = match read_result {
+                Ok(request_size) => request_size,
+                Err(error) => {
+                    logging::log!("Failed to read from connection: {}", error);
+                    return;
+                }
+            };
+
+            let response = handle_request(buffer, request_size);
+            responses::respond(stream, response).await;
         });
     }
 }
 
-async fn handle_connection_async(mut stream: TcpStream) -> std::io::Result<()> {
-    let buffer = &mut [0; 512];
-    let request_size = stream.read(buffer).await?;
-
+fn handle_request(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
     logging::log!("Got request");
 
     if &buffer[0..3] == b"GET" {
         logging::log!("GET");
-        return bank_statement::get(stream, buffer, request_size).await;
+        return bank_statement::get(buffer, request_size);
     }
 
     if &buffer[0..4] == b"POST" {
         logging::log!("POST");
-        return transaction::post(stream, buffer, request_size).await;
+        return transaction::post(buffer, request_size);
     }
 
-    stream
-        .write_all(static_responses::METHOD_NOT_ALLOWED)
-        .await?;
-    Ok(())
+    return ResponseType::MethodNotAllowed;
 }
