@@ -20,7 +20,6 @@ async fn main() {
     dotenvy::dotenv().ok();
     let args: Vec<String> = std::env::args().collect();
     let default_port = "9999".to_string();
-    dbg!(*crate::logging::get_enable_log());
     let port = args.get(1).unwrap_or(&default_port);
     db::init();
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
