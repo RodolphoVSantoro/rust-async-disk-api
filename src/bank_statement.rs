@@ -1,10 +1,5 @@
-use crate::{
-    db, logging,
-    static_responses::{INTERNAL_SERVER_ERROR, NOT_FOUND, UNPROCESSABLE_ENTITY},
-    transaction::Transaction,
-};
+use crate::{db, responses::ResponseType, transaction::Transaction};
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct StatementResponseSaldo {
@@ -19,33 +14,24 @@ pub struct StatementResponse<'a> {
     ultimas_transacoes: Vec<&'a Transaction>,
 }
 
-pub async fn get(
-    mut stream: TcpStream,
-    buffer: &mut [u8; 512],
-    request_size: usize,
-) -> std::io::Result<()> {
+pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
     if request_size < 15 {
-        stream.write_all(UNPROCESSABLE_ENTITY).await?;
-        return Ok(());
+        return ResponseType::UnprocessableEntity;
     }
     let id = match get_id(buffer) {
         Some(id) => id,
         None => {
-            stream.write_all(NOT_FOUND).await?;
-            return Ok(());
+            return ResponseType::NotFound;
         }
     };
 
     let user = match db::read_user(id) {
-        Ok(user) => user,
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                stream.write_all(NOT_FOUND).await?;
-                return Ok(());
-            }
-            logging::log!("Error reading user: {}", e);
-            stream.write_all(INTERNAL_SERVER_ERROR).await?;
-            return Ok(());
+        db::ReadUserResult::Ok(user) => user,
+        db::ReadUserResult::NotFound => {
+            return ResponseType::NotFound;
+        }
+        db::ReadUserResult::InternalError(e) => {
+            return ResponseType::InternalServerError(e);
         }
     };
 
@@ -61,11 +47,14 @@ pub async fn get(
         ultimas_transacoes: user.get_ordered_transactions(),
     };
 
-    let response_body = serde_json::to_string(&statement_response).unwrap();
-
-    let response = format!("HTTP/1.1 200 OK\nContent-Type: application/json\n\n{response_body}",);
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
+    let serialize_result = serde_json::to_string(&statement_response);
+    return match serialize_result {
+        Ok(response_body) => ResponseType::Ok(response_body),
+        Err(e) => {
+            let error_string = format!("Error serializing response: {}", e);
+            return ResponseType::InternalServerError(error_string);
+        }
+    };
 }
 
 fn get_id(buffer: &[u8]) -> Option<u32> {

@@ -18,8 +18,6 @@ pub fn get_enable_log() -> &'static bool {
     });
 }
 
-// pub const ENABLE_LOG: bool = false;
-
 macro_rules! log {
     ($($arg:expr),*) => {
         if *crate::logging::get_enable_log() {

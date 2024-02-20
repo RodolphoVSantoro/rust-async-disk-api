@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::{
-    db::update_user_with_transaction,
+    db::{update_user_with_transaction, UpdateUserResult},
     logging,
-    static_responses::{INTERNAL_SERVER_ERROR, UNPROCESSABLE_ENTITY},
+    responses::ResponseType,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,11 +43,7 @@ impl Default for Transaction {
 // 16 + 38 = 54 for the minimum size of a valid request
 const MINIMUM_POST_REQUEST_SIZE: usize = 54;
 
-pub async fn post(
-    mut stream: TcpStream,
-    buffer: &mut [u8; 512],
-    request_size: usize,
-) -> std::io::Result<()> {
+pub fn post(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
     logging::log!("Request size: {}", request_size);
     logging::log!(
         "Buffer: {}",
@@ -56,24 +51,21 @@ pub async fn post(
     );
     if request_size < MINIMUM_POST_REQUEST_SIZE {
         logging::log!("Request too small");
-        stream.write_all(UNPROCESSABLE_ENTITY).await?;
-        return Ok(());
+        return ResponseType::UnprocessableEntity;
     }
 
     let id = match get_id(buffer) {
         Some(id) => id,
         None => {
             logging::log!("Id not found in request");
-            stream.write_all(UNPROCESSABLE_ENTITY).await?;
-            return Ok(());
+            return ResponseType::UnprocessableEntity;
         }
     };
 
     let transaction = match get_body(buffer) {
         Some(transaction) => transaction,
         None => {
-            stream.write_all(UNPROCESSABLE_ENTITY).await?;
-            return Ok(());
+            return ResponseType::UnprocessableEntity;
         }
     };
 
@@ -88,15 +80,17 @@ pub async fn post(
     };
 
     let user = match update_user_with_transaction(id, &transaction) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            stream.write_all(UNPROCESSABLE_ENTITY).await?;
-            return Ok(());
+        UpdateUserResult::Ok(user) => user,
+        UpdateUserResult::Unprocessable(err) => {
+            logging::log!("Unprocessable entity: {}", err);
+            return ResponseType::UnprocessableEntity;
         }
-        Err(e) => {
-            logging::log!("Error updating user with transaction: {}", e);
-            stream.write_all(INTERNAL_SERVER_ERROR).await?;
-            return Ok(());
+        UpdateUserResult::NotFound => {
+            logging::log!("User {} not found on update", id);
+            return ResponseType::NotFound;
+        }
+        UpdateUserResult::InternalError(error) => {
+            return ResponseType::InternalServerError(error);
         }
     };
 
@@ -116,18 +110,12 @@ pub async fn post(
     let response_str = match serde_json::to_string(&response) {
         Ok(response_str) => response_str,
         Err(e) => {
-            logging::log!("Error serializing response: {}", e);
-            stream.write_all(INTERNAL_SERVER_ERROR).await?;
-            return Ok(());
+            let error_string = format!("Error serializing response: {}", e);
+            return ResponseType::InternalServerError(error_string);
         }
     };
 
-    let response = format!(
-        "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{}",
-        response_str
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
+    return ResponseType::Ok(response_str);
 }
 
 fn get_id(buffer: &[u8]) -> Option<u32> {

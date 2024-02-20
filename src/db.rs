@@ -21,10 +21,10 @@ pub fn init() {
     for (i, limit) in INITIAL_USER_LIMITS.iter().enumerate() {
         let i: u32 = i.try_into().unwrap();
         match create_user(i + 1, *limit) {
-            Ok(()) => {
+            CreateUserResult::Ok => {
                 logging::log!("User {} created", i + 1);
             }
-            Err(e) => {
+            CreateUserResult::InternalError(e) => {
                 panic!("Error creating user: {}", e);
             }
         }
@@ -32,20 +32,26 @@ pub fn init() {
     logging::log!("Database initialized successfully!");
 }
 
-pub fn read_user(id: u32) -> std::io::Result<User> {
+pub enum ReadUserResult {
+    Ok(User),
+    NotFound,
+    InternalError(String),
+}
+
+pub fn read_user(id: u32) -> ReadUserResult {
     let file_path = format!("data/user{}.bin", id);
     let file = match File::open(file_path) {
         Ok(file) => file,
         Err(e) => {
             logging::log!("Error opening file: {}", e);
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, e));
+            return ReadUserResult::NotFound;
         }
     };
     match file.lock_shared() {
         Ok(()) => {}
         Err(e) => {
-            logging::log!("Error locking file for read: {}", e);
-            return Err(e);
+            let error_string = format!("Error locking file for read: {}", e);
+            return ReadUserResult::InternalError(error_string);
         }
     };
     let mut buff_reader = BufReader::new(file);
@@ -54,36 +60,39 @@ pub fn read_user(id: u32) -> std::io::Result<User> {
     match buff_reader.read_to_end(&mut serialized_user) {
         Ok(_) => {}
         Err(e) => {
-            logging::log!("Error reading from file: {}", e);
-            return Err(e);
+            let error_string = format!("Error reading from file: {}", e);
+            return ReadUserResult::InternalError(error_string);
         }
     }
 
-    let user = match bincode::deserialize(&serialized_user) {
-        Ok(user) => Ok(user),
+    return match bincode::deserialize(&serialized_user) {
+        Ok(user) => ReadUserResult::Ok(user),
         Err(e) => {
-            logging::log!("Error deserializing user: {}", e);
-            Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+            let error_string = format!("Error deserializing user: {}", e);
+            return ReadUserResult::InternalError(error_string);
         }
     };
-
-    return user;
 }
 
-pub fn create_user(id: u32, limit: u32) -> std::io::Result<()> {
+pub enum CreateUserResult {
+    Ok,
+    InternalError(String),
+}
+
+pub fn create_user(id: u32, limit: u32) -> CreateUserResult {
     let file_path = format!("data/user{}.bin", id);
     let file = match File::create(file_path) {
         Ok(file) => file,
         Err(e) => {
-            logging::log!("Error opening file: {}", e);
-            return Err(e);
+            let error_string = format!("Error opening file: {}", e);
+            return CreateUserResult::InternalError(error_string);
         }
     };
     match file.lock_exclusive() {
         Ok(()) => {}
         Err(e) => {
-            logging::log!("Error locking file for read: {}", e);
-            return Err(e);
+            let error_string = format!("Error locking file for write: {}", e);
+            return CreateUserResult::InternalError(error_string);
         }
     };
     let mut buff_writer = BufWriter::new(file);
@@ -97,40 +106,52 @@ pub fn create_user(id: u32, limit: u32) -> std::io::Result<()> {
     let serialized_user = match bincode::serialize(&user) {
         Ok(serialized_user) => serialized_user,
         Err(e) => {
-            logging::log!("Error serializing user: {}", e);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
+            let error_string = format!("Error serializing user: {}", e);
+            return CreateUserResult::InternalError(error_string);
         }
     };
     match buff_writer.write_all(&serialized_user) {
         Ok(()) => {}
         Err(e) => {
-            logging::log!("Error writing to file: {}", e);
-            return Err(e);
+            let error_string = format!("Error writing to file: {}", e);
+            return CreateUserResult::InternalError(error_string);
         }
     }
 
-    buff_writer.flush()?;
-
-    return Ok(());
+    return match buff_writer.flush() {
+        Ok(()) => CreateUserResult::Ok,
+        Err(e) => {
+            let error_string = format!("Error flushing to file: {}", e);
+            return CreateUserResult::InternalError(error_string);
+        }
+    };
 }
 
-pub fn update_user_with_transaction(
-    id: u32,
-    transaction: &Transaction,
-) -> std::io::Result<Option<User>> {
+pub enum UpdateUserResult {
+    Ok(User),
+    NotFound,
+    Unprocessable(String),
+    InternalError(String),
+}
+
+pub fn update_user_with_transaction(id: u32, transaction: &Transaction) -> UpdateUserResult {
     // init file and buffers
     let file_path = format!("data/user{}.bin", id);
     let file_result = std::fs::OpenOptions::new()
-        .create(true)
         .write(true)
         .read(true)
         .open(file_path);
     let file = match file_result {
         Ok(file) => file,
-        Err(e) => {
-            logging::log!("Error opening file: {}", e);
-            return Err(e);
-        }
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                return UpdateUserResult::NotFound;
+            }
+            _ => {
+                let error_string = format!("Error opening file: {}", e);
+                return UpdateUserResult::InternalError(error_string);
+            }
+        },
     };
 
     let mut buff_reader = BufReader::new(&file);
@@ -139,8 +160,8 @@ pub fn update_user_with_transaction(
     match file.lock_exclusive() {
         Ok(()) => {}
         Err(e) => {
-            logging::log!("Error locking file for read: {}", e);
-            return Err(e);
+            let error_string = format!("Error locking file for read: {}", e);
+            return UpdateUserResult::InternalError(error_string);
         }
     };
 
@@ -149,8 +170,8 @@ pub fn update_user_with_transaction(
     match buff_reader.read_to_end(&mut serialized_user) {
         Ok(_) => {}
         Err(e) => {
-            logging::log!("Error reading from file: {}", e);
-            return Err(e);
+            let error_string = format!("Error reading from file: {}", e);
+            return UpdateUserResult::InternalError(error_string);
         }
     }
 
@@ -158,8 +179,8 @@ pub fn update_user_with_transaction(
     let mut user: User = match bincode::deserialize(&serialized_user) {
         Ok(user) => user,
         Err(e) => {
-            logging::log!("Error deserializing user: {}", e);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
+            let error_string = format!("Error deserializing user: {}", e);
+            return UpdateUserResult::InternalError(error_string);
         }
     };
 
@@ -171,12 +192,16 @@ pub fn update_user_with_transaction(
         }
         // Return None if the transaction is invalid
         TransactionResult::LimitExceeded => {
-            logging::log!("Limit exceeded for user {}", id);
-            return Ok(None);
+            let error_string = format!("Limit exceeded for user {}", id);
+            return UpdateUserResult::Unprocessable(error_string);
         }
-        TransactionResult::InvalidTransactionType => {
-            logging::log!("Invalid transaction type for user {}", id);
-            return Ok(None);
+        TransactionResult::InvalidDescription => {
+            let error_string = format!("Invalid description for user {}", id);
+            return UpdateUserResult::Unprocessable(error_string);
+        }
+        TransactionResult::InvalidTransactionKind(t) => {
+            let error_string = format!("Invalid transaction kind {} for user {}", t, id);
+            return UpdateUserResult::Unprocessable(error_string);
         }
     };
 
@@ -184,8 +209,8 @@ pub fn update_user_with_transaction(
     let serialized_user = match bincode::serialize(&user) {
         Ok(serialized_user) => serialized_user,
         Err(e) => {
-            logging::log!("Error serializing user: {}", e);
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
+            let error_string = format!("Error serializing user: {}", e);
+            return UpdateUserResult::InternalError(error_string);
         }
     };
 
@@ -193,18 +218,18 @@ pub fn update_user_with_transaction(
     match buff_reader.seek(std::io::SeekFrom::Start(0)) {
         Ok(_) => {}
         Err(e) => {
-            logging::log!("Error seeking to start of file: {}", e);
-            return Err(e);
+            let error_string = format!("Error seeking to start of file: {}", e);
+            return UpdateUserResult::InternalError(error_string);
         }
     };
     // write updated user to file
     match buff_writer.write_all(&serialized_user) {
         Ok(()) => {}
         Err(e) => {
-            logging::log!("Error writing to file: {}", e);
-            return Err(e);
+            let error_string = format!("Error writing to file: {}", e);
+            return UpdateUserResult::InternalError(error_string);
         }
     }
 
-    return Ok(Some(user));
+    return UpdateUserResult::Ok(user);
 }

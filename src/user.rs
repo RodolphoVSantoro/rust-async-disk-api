@@ -13,13 +13,14 @@ pub struct User {
 pub enum TransactionResult {
     Ok,
     LimitExceeded,
-    InvalidTransactionType,
+    InvalidTransactionKind(u8),
+    InvalidDescription,
 }
 
 impl User {
     pub fn compute_transaction(&mut self, transaction: &Transaction) -> TransactionResult {
         if transaction.descricao.len() > 10 || transaction.descricao.is_empty() {
-            return TransactionResult::InvalidTransactionType;
+            return TransactionResult::InvalidDescription;
         }
 
         let int_transaction_value: i32 = transaction
@@ -42,7 +43,10 @@ impl User {
                 self.total -= int_transaction_value;
                 return TransactionResult::Ok;
             }
-            _ => return TransactionResult::InvalidTransactionType,
+            tipo => {
+                let t = tipo.as_bytes()[0];
+                return TransactionResult::InvalidTransactionKind(t);
+            }
         }
     }
     pub fn add_transaction(&mut self, transaction: &Transaction) {
