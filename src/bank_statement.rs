@@ -51,7 +51,7 @@ pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
     return match serialize_result {
         Ok(response_body) => ResponseType::Ok(response_body),
         Err(e) => {
-            let error_string = format!("Error serializing response: {}", e.to_string());
+            let error_string = format!("Error serializing response: {}", e);
             return ResponseType::InternalServerError(error_string);
         }
     };

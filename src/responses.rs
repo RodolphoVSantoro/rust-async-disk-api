@@ -32,8 +32,8 @@ pub enum ResponseType{
     UnprocessableEntity,
 }
 
-pub async fn respond(mut stream: TcpStream, response: ResponseType) {
-    let result = match response {
+pub async fn respond(mut stream: TcpStream, response: ResponseType) -> std::io::Result<()> {
+    return match response {
         ResponseType::Ok(response_body) => {
             let response = format!("HTTP/1.1 200 OK\nContent-Type: application/json\n\n{response_body}");
             stream.write_all(response.as_bytes()).await
@@ -52,10 +52,4 @@ pub async fn respond(mut stream: TcpStream, response: ResponseType) {
             stream.write_all(UNPROCESSABLE_ENTITY).await
         }
     };
-    match result {
-        Ok(_) => {}
-        Err(e) => {
-            logging::log!("Error writing to stream on response: {}", e);
-        }
-    }
 }

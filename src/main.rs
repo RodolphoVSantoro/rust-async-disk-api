@@ -41,7 +41,12 @@ async fn main() {
             };
 
             let response = handle_request(buffer, request_size);
-            responses::respond(stream, response).await;
+            match responses::respond(stream, response).await {
+                Ok(_) => {}
+                Err(e) => {
+                    logging::log!("Failed to write to connection: {}", e);
+                }
+            };
         });
     }
 }
