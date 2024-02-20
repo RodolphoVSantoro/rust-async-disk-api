@@ -43,18 +43,18 @@ impl Default for Transaction {
 // 16 + 38 = 54 for the minimum size of a valid request
 const MINIMUM_POST_REQUEST_SIZE: usize = 54;
 
-pub fn post(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
+pub fn post(request: &mut [u8; 512], request_size: usize) -> ResponseType {
     logging::log!("Request size: {}", request_size);
     logging::log!(
-        "Buffer: {}",
-        logging::into_log_string(&buffer[..request_size])
+        "Request: {}",
+        logging::into_log_string(&request[..request_size])
     );
     if request_size < MINIMUM_POST_REQUEST_SIZE {
         logging::log!("Request too small");
         return ResponseType::UnprocessableEntity;
     }
 
-    let id = match get_id(buffer) {
+    let id = match get_id(request) {
         Some(id) => id,
         None => {
             logging::log!("Id not found in request");
@@ -62,7 +62,7 @@ pub fn post(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
         }
     };
 
-    let transaction = match get_body(buffer) {
+    let transaction = match get_body(request) {
         Some(transaction) => transaction,
         None => {
             return ResponseType::UnprocessableEntity;
@@ -118,10 +118,10 @@ pub fn post(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
     return ResponseType::Ok(response_str);
 }
 
-fn get_id(buffer: &[u8]) -> Option<u32> {
-    let first_separator = buffer[14];
-    let maybe_id = buffer[15];
-    let second_separator = buffer[16];
+fn get_id(request: &[u8]) -> Option<u32> {
+    let first_separator = request[14];
+    let maybe_id = request[15];
+    let second_separator = request[16];
     if first_separator != b'/' || second_separator != b'/' || !maybe_id.is_ascii_digit() {
         return None;
     }
@@ -130,8 +130,9 @@ fn get_id(buffer: &[u8]) -> Option<u32> {
     return Some(id - zero_ascii);
 }
 
-fn get_body(buffer: &[u8]) -> Option<TransactionRequest> {
-    let body_start = match buffer.iter().position(|&x| return x == b'{') {
+fn get_body(request: &[u8]) -> Option<TransactionRequest> {
+    let mut request_iter = request.iter();
+    let body_start = match request_iter.position(|&x| return x == b'{') {
         Some(index) => index,
         None => {
             logging::log!("Failed to find start of json");
@@ -139,23 +140,23 @@ fn get_body(buffer: &[u8]) -> Option<TransactionRequest> {
         }
     };
     logging::log!("Body start: {}", body_start);
-    let mut body_end = match buffer[body_start..].iter().position(|&x| return x == b'}') {
+    let mut body_end = match request_iter.position(|&x| return x == b'}') {
         Some(index) => index,
         None => {
             logging::log!("Failed to find end of json");
             return None;
         }
     };
-    body_end = body_end + body_start + 1;
+    body_end = body_end + body_start + 2;
     logging::log!("Body end: {}", body_end);
 
     let transaction =
-        match serde_json::from_slice::<TransactionRequest>(&buffer[body_start..body_end]) {
+        match serde_json::from_slice::<TransactionRequest>(&request[body_start..body_end]) {
             Ok(transaction) => transaction,
             Err(_) => {
                 logging::log!(
                     "Failed to parse body from request {}",
-                    logging::into_log_string(&buffer[body_start..body_end])
+                    logging::into_log_string(&request[body_start..body_end])
                 );
                 return None;
             }

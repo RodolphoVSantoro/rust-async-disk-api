@@ -19,7 +19,7 @@ pub fn init() {
     };
     logging::log!("Initializing database");
     for (i, limit) in INITIAL_USER_LIMITS.iter().enumerate() {
-        let i: u32 = i.try_into().unwrap();
+        let i: u32 = i.try_into().expect("Failed to convert i to u32");
         match create_user(i + 1, *limit) {
             CreateUserResult::Ok => {
                 logging::log!("User {} created", i + 1);

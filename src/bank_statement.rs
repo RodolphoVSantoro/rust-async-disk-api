@@ -15,11 +15,11 @@ pub struct StatementResponse<'a> {
     ultimas_transacoes: [Option<&'a Transaction>; 10],
 }
 
-pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
+pub fn get(request: &mut [u8; 512], request_size: usize) -> ResponseType {
     if request_size < 15 {
         return ResponseType::UnprocessableEntity;
     }
-    let id = match get_id(buffer) {
+    let id = match get_id(request) {
         Some(id) => id,
         None => {
             return ResponseType::NotFound;
@@ -60,10 +60,10 @@ pub fn get(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
     };
 }
 
-fn get_id(buffer: &[u8]) -> Option<u32> {
-    let first_separator = buffer[13];
-    let maybe_id = buffer[14];
-    let second_separator = buffer[15];
+fn get_id(request: &[u8]) -> Option<u32> {
+    let first_separator = request[13];
+    let maybe_id = request[14];
+    let second_separator = request[15];
     if first_separator != b'/' || second_separator != b'/' || !maybe_id.is_ascii_digit() {
         return None;
     }
@@ -76,6 +76,6 @@ fn serialize_transactions<S>(v: &[Option<&Transaction>; 10], s: S) -> Result<S::
 where
     S: serde::Serializer,
 {
-    let i = v.iter().position(|x| x.is_none()).unwrap_or(v.len());
+    let i = v.iter().position(|x| return x.is_none()).unwrap_or(v.len());
     return v[0..i].serialize(s);
 }

@@ -29,8 +29,8 @@ async fn main() {
 
     while let Ok((mut stream, _)) = listener.accept().await {
         tokio::spawn(async move {
-            let buffer = &mut [0; 512];
-            let read_result = stream.read(buffer).await;
+            let request_buffer = &mut [0; 512];
+            let read_result = stream.read(request_buffer).await;
             let request_size = match read_result {
                 Ok(request_size) => request_size,
                 Err(error) => {
@@ -39,9 +39,9 @@ async fn main() {
                 }
             };
 
-            let response = handle_request(buffer, request_size);
+            let response = handle_request(request_buffer, request_size);
             match responses::respond(stream, response).await {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(e) => {
                     logging::log!("Failed to write to connection: {}", e);
                 }
@@ -50,17 +50,17 @@ async fn main() {
     }
 }
 
-fn handle_request(buffer: &mut [u8; 512], request_size: usize) -> ResponseType {
+fn handle_request(request: &mut [u8; 512], request_size: usize) -> ResponseType {
     logging::log!("Got request");
 
-    if &buffer[0..3] == b"GET" {
+    if &request[0..3] == b"GET" {
         logging::log!("GET");
-        return bank_statement::get(buffer, request_size);
+        return bank_statement::get(request, request_size);
     }
 
-    if &buffer[0..4] == b"POST" {
+    if &request[0..4] == b"POST" {
         logging::log!("POST");
-        return transaction::post(buffer, request_size);
+        return transaction::post(request, request_size);
     }
 
     return ResponseType::MethodNotAllowed;
