@@ -1,13 +1,52 @@
-use crate::transaction::Transaction;
+use crate::transaction::{self, Transaction};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct UserDb {
+    pub id: i32,
+    pub balance_limit: i32,
+    pub balance: i32,
+    pub transactions_count: i32,
+    pub last_transaction: i32,
+    pub encoded_transactions: Option<Vec<u8>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct User {
-    pub limit: u32,
-    pub total: i32,
-    pub n_transactions: u32,
-    pub last_transaction: u32,
+    pub id: i32,
+    pub balance_limit: i32,
+    pub balance: i32,
+    pub transactions_count: i32,
+    pub last_transaction: i32,
     pub transactions: [Transaction; 10],
+}
+
+impl From<User> for UserDb {
+    fn from(user: User) -> Self {
+        return UserDb {
+            id: user.id,
+            balance_limit: user.balance_limit,
+            balance: user.balance,
+            transactions_count: user.transactions_count,
+            last_transaction: user.last_transaction,
+            encoded_transactions: Some(transaction::encode_transactions(&user.transactions)),
+        };
+    }
+}
+
+impl From<UserDb> for User {
+    fn from(user: UserDb) -> Self {
+        let mut transactions: [Transaction; 10] = Default::default();
+        transaction::decode_transactions(user.encoded_transactions, &mut transactions);
+        return User {
+            id: user.id,
+            balance_limit: user.balance_limit,
+            balance: user.balance,
+            transactions_count: user.transactions_count,
+            last_transaction: user.last_transaction,
+            transactions,
+        };
+    }
 }
 
 pub enum TransactionResult {
@@ -23,24 +62,17 @@ impl User {
             return TransactionResult::InvalidDescription;
         }
 
-        let int_transaction_value: i32 = transaction
-            .valor
-            .try_into()
-            .expect("failed to convert transaction.valor to i32");
         match transaction.tipo.as_str() {
             "c" => {
-                self.total += int_transaction_value;
+                self.balance += transaction.valor;
                 return TransactionResult::Ok;
             }
             "d" => {
-                let limit: i32 = self
-                    .limit
-                    .try_into()
-                    .expect("failed to convert limit to i32");
-                if self.total - int_transaction_value < -limit {
+                let limit = self.balance_limit;
+                if self.balance - transaction.valor < -limit {
                     return TransactionResult::LimitExceeded;
                 }
-                self.total -= int_transaction_value;
+                self.balance -= transaction.valor;
                 return TransactionResult::Ok;
             }
             tipo => {
@@ -56,14 +88,14 @@ impl User {
             tipo: transaction.tipo.clone(),
             realizada_em: transaction.realizada_em.clone(),
         };
-        if self.n_transactions < 10 {
+        if self.transactions_count < 10 {
             let index: usize = self
-                .n_transactions
+                .transactions_count
                 .try_into()
                 .expect("failed to convert n_transactions to usize");
             self.transactions[index] = copy_transaction;
-            self.n_transactions += 1;
-            self.last_transaction = self.n_transactions % 10;
+            self.transactions_count += 1;
+            self.last_transaction = self.transactions_count % 10;
             return;
         }
         let index: usize = self
@@ -77,18 +109,11 @@ impl User {
         &'a self,
         ordered_transactions: &mut [Option<&'a Transaction>; 10],
     ) {
-        if self.n_transactions == 0 {
+        if self.transactions_count == 0 {
             return;
         }
-        let n_transactions: i32 = self
-            .n_transactions
-            .try_into()
-            .expect("failed to convert n_transactions to i32");
-        let mut i: i32 = self
-            .last_transaction
-            .try_into()
-            .expect("failed to convert last_transaction to i32");
-
+        let n_transactions = self.transactions_count;
+        let mut i = self.last_transaction;
         i = (i - 1 + n_transactions) % n_transactions;
         for j in 0..n_transactions {
             let index_i: usize = i.try_into().expect("failed to convert i to i32");

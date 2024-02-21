@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET balance = $1, transactions_count = $2, last_transaction = $3, encoded_transactions = $4 WHERE id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "12a7b89b16684c6ee8bba2f02af78631bccede5779aefa7d97b229843c4a5220"
+}

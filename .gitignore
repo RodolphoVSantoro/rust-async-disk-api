@@ -1,6 +1,5 @@
 /target
 .vscode
 data
-.env
 #test results
 **/results

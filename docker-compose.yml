@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   api1: &app1
-    command: "./rust-async-disk-api 3000"
+    command: "./rust-async-disk-api 3000 resetDb"
     build:
       context: .
       dockerfile: ./Dockerfile
@@ -12,16 +12,12 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: "125MB"
-    volumes:
-      - ./data:/app/data
+          memory: "75MB"
 
   api2:
     <<: *app1
     command: "./rust-async-disk-api 3001"
     hostname: api2
-    volumes:
-      - ./data:/app/data
 
   nginx:
     image: nginx:latest
@@ -36,5 +32,22 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.00"
+          cpus: "0.5"
+          memory: "100MB"
+  db:
+    image: postgres:16
+    volumes:
+      - ./db:/docker-entrypoint-initdb.d
+    command: postgres -c log_min_messages=FATAL -c max_connections=20 -c shared_buffers=128MB -c fsync=off -c synchronous_commit=off -c checkpoint_timeout=1d -c full_page_writes=false
+    network_mode: host
+    environment:
+      POSTGRES_USER: rinha
+      POSTGRES_PASSWORD: rinha
+      POSTGRES_DB: rinha
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
           memory: "300MB"
