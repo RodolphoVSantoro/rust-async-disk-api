@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "balance_limit",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "balance",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "transactions_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_transaction",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "encoded_transactions",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "e3d7a6852d05abf37d13fc6d37e43aa065ca6dcae168bcaad996298a4d137b2f"
+}

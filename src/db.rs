@@ -1,133 +1,93 @@
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Seek, Write};
+use std::sync::Arc;
+
+use sqlx::{Pool, Postgres};
 
 use crate::logging;
-use crate::transaction::Transaction;
-use crate::user::{TransactionResult, User};
+use crate::transaction::{self, Transaction};
+use crate::user::{TransactionResult, User, UserDb};
 
-use fs4::FileExt;
-
-const INITIAL_USER_LIMITS: [u32; 5] = [100_000, 80_000, 1_000_000, 10_000_000, 500_000];
-pub fn init() {
-    match std::fs::create_dir_all("./data") {
-        Ok(()) => {
-            logging::log!("Data directory created successfully!");
+const INITIAL_USER_LIMITS: [i32; 5] = [100_000, 80_000, 1_000_000, 10_000_000, 500_000];
+pub async fn reset(pool: &Pool<Postgres>) {
+    logging::log!("Initializing database");
+    let delete_result = sqlx::query("DELETE FROM users").execute(pool).await;
+    match delete_result {
+        Ok(rows) => {
+            logging::log!("{} Users deleted successfully!", rows.rows_affected());
         }
         Err(e) => {
-            panic!("Error creating data directory: {}", e);
+            panic!("Error deleting users: {}", e);
         }
     };
-    logging::log!("Initializing database");
     for (i, limit) in INITIAL_USER_LIMITS.iter().enumerate() {
-        let i: u32 = i.try_into().expect("Failed to convert i to u32");
-        match create_user(i + 1, *limit) {
-            CreateUserResult::Ok => {
-                logging::log!("User {} created", i + 1);
+        let user = User {
+            id: i32::try_from(i + 1).expect("Error converting user id"),
+            balance_limit: *limit,
+            balance: 0,
+            transactions_count: 0,
+            last_transaction: 0,
+            transactions: Default::default(),
+        };
+        match create_user(pool, user).await {
+            CreateUserResult::Ok(_) => {
+                logging::log!("User {} created successfully!", i + 1);
             }
             CreateUserResult::InternalError(e) => {
-                panic!("Error creating user: {}", e);
+                panic!("Error creating user {}: {}", i + 1, e);
             }
-        }
+        };
     }
-    logging::log!("Database initialized successfully!");
 }
 
 pub enum ReadUserResult {
-    Ok(User),
+    Ok,
     NotFound,
     InternalError(String),
 }
 
-pub fn read_user(id: u32) -> ReadUserResult {
-    let file_path = format!("data/user{}.bin", id);
-    let file = match File::open(file_path) {
-        Ok(file) => file,
-        Err(e) => match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                return ReadUserResult::NotFound;
-            }
-            _ => {
-                let error_string = format!("Error opening file: {}", e);
-                return ReadUserResult::InternalError(error_string);
-            }
-        },
-    };
-    match file.lock_shared() {
-        Ok(()) => {}
+pub async fn read_user(pool: Arc<Pool<Postgres>>, id: i32, user: &mut User) -> ReadUserResult {
+    let db_user = match sqlx::query_as!(UserDb, "SELECT * FROM users WHERE id = $1", id)
+        .fetch_optional(pool.as_ref())
+        .await
+    {
+        Ok(user) => user,
         Err(e) => {
-            let error_string = format!("Error locking file for read: {}", e);
-            return ReadUserResult::InternalError(error_string);
+            let error_str = format!("Error reading user: {}", e);
+            return ReadUserResult::InternalError(error_str);
         }
     };
-    let mut buff_reader = BufReader::new(file);
-
-    let mut serialized_user = Vec::new();
-    match buff_reader.read_to_end(&mut serialized_user) {
-        Ok(_) => {}
-        Err(e) => {
-            let error_string = format!("Error reading from file: {}", e);
-            return ReadUserResult::InternalError(error_string);
+    return match db_user {
+        Some(db_user) => {
+            user.balance = db_user.balance;
+            user.balance_limit = db_user.balance_limit;
+            user.transactions_count = db_user.transactions_count;
+            user.last_transaction = db_user.last_transaction;
+            transaction::decode_transactions(db_user.encoded_transactions, &mut user.transactions);
+            return ReadUserResult::Ok;
         }
-    }
-
-    return match bincode::deserialize(&serialized_user) {
-        Ok(user) => ReadUserResult::Ok(user),
-        Err(e) => {
-            let error_string = format!("Error deserializing user: {}", e);
-            return ReadUserResult::InternalError(error_string);
-        }
+        None => ReadUserResult::NotFound,
     };
 }
-
 pub enum CreateUserResult {
-    Ok,
+    Ok(u64),
     InternalError(String),
 }
 
-pub fn create_user(id: u32, limit: u32) -> CreateUserResult {
-    let file_path = format!("data/user{}.bin", id);
-    let file = match File::create(file_path) {
-        Ok(file) => file,
+pub async fn create_user(pool: &Pool<Postgres>, user: User) -> CreateUserResult {
+    let insert_result = sqlx::query_as!(
+            UserDb,
+            "INSERT INTO users (id, balance_limit, balance, transactions_count, last_transaction, encoded_transactions) VALUES ($1, $2, $3, $4, $5, $6)",
+            user.id,
+            user.balance_limit,
+            user.balance,
+            user.transactions_count,
+            user.last_transaction,
+            transaction::encode_transactions(&user.transactions)
+        ).execute(pool).await;
+    return match insert_result {
+        Ok(rows) => CreateUserResult::Ok(rows.rows_affected()),
         Err(e) => {
-            let error_string = format!("Error opening file: {}", e);
-            return CreateUserResult::InternalError(error_string);
-        }
-    };
-    match file.lock_exclusive() {
-        Ok(()) => {}
-        Err(e) => {
-            let error_string = format!("Error locking file for write: {}", e);
-            return CreateUserResult::InternalError(error_string);
-        }
-    };
-    let mut buff_writer = BufWriter::new(file);
-    let user = User {
-        limit,
-        total: 0,
-        n_transactions: 0,
-        last_transaction: 0,
-        transactions: Default::default(),
-    };
-    let serialized_user = match bincode::serialize(&user) {
-        Ok(serialized_user) => serialized_user,
-        Err(e) => {
-            let error_string = format!("Error serializing user: {}", e);
-            return CreateUserResult::InternalError(error_string);
-        }
-    };
-    match buff_writer.write_all(&serialized_user) {
-        Ok(()) => {}
-        Err(e) => {
-            let error_string = format!("Error writing to file: {}", e);
-            return CreateUserResult::InternalError(error_string);
-        }
-    }
-
-    return match buff_writer.flush() {
-        Ok(()) => CreateUserResult::Ok,
-        Err(e) => {
-            let error_string = format!("Error flushing to file: {}", e);
-            return CreateUserResult::InternalError(error_string);
+            let error_str = format!("Error inserting users: {}", e);
+            return CreateUserResult::InternalError(error_str);
         }
     };
 }
@@ -139,57 +99,35 @@ pub enum UpdateUserResult {
     InternalError(String),
 }
 
-pub fn update_user_with_transaction(id: u32, transaction: &Transaction) -> UpdateUserResult {
-    // init file and buffers
-    let file_path = format!("data/user{}.bin", id);
-    let file_result = std::fs::OpenOptions::new()
-        .write(true)
-        .read(true)
-        .open(file_path);
-    let file = match file_result {
-        Ok(file) => file,
-        Err(e) => match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                return UpdateUserResult::NotFound;
-            }
-            _ => {
-                let error_string = format!("Error opening file: {}", e);
-                return UpdateUserResult::InternalError(error_string);
-            }
-        },
-    };
-
-    let mut buff_reader = BufReader::new(&file);
-    let mut buff_writer = BufWriter::new(&file);
-
-    match file.lock_exclusive() {
-        Ok(()) => {}
+pub async fn update_user_with_transaction(
+    pool: Arc<Pool<Postgres>>,
+    id: i32,
+    transaction: &Transaction,
+) -> UpdateUserResult {
+    let postgres_transaction = pool.begin().await;
+    let mut postgres_transaction = match postgres_transaction {
+        Ok(transaction) => transaction,
         Err(e) => {
-            let error_string = format!("Error locking file for read: {}", e);
-            return UpdateUserResult::InternalError(error_string);
+            let error_str = format!("Error starting transaction: {}", e);
+            return UpdateUserResult::InternalError(error_str);
+        }
+    };
+    let db_user = match sqlx::query_as!(UserDb, "SELECT * FROM users WHERE id = $1 FOR UPDATE", id)
+        .fetch_optional(&mut *postgres_transaction)
+        .await
+    {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return UpdateUserResult::NotFound;
+        }
+        Err(e) => {
+            let error_str = format!("Error reading user for update: {}", e);
+            return UpdateUserResult::InternalError(error_str);
         }
     };
 
-    // read serialized user from file
-    let mut serialized_user = Vec::new();
-    match buff_reader.read_to_end(&mut serialized_user) {
-        Ok(_) => {}
-        Err(e) => {
-            let error_string = format!("Error reading from file: {}", e);
-            return UpdateUserResult::InternalError(error_string);
-        }
-    }
+    let mut user = User::from(db_user);
 
-    // deserialize user
-    let mut user: User = match bincode::deserialize(&serialized_user) {
-        Ok(user) => user,
-        Err(e) => {
-            let error_string = format!("Error deserializing user: {}", e);
-            return UpdateUserResult::InternalError(error_string);
-        }
-    };
-
-    // compute transaction and update user if it is valid
     match user.compute_transaction(transaction) {
         TransactionResult::Ok => {
             logging::log!("Transaction computed successfully! Adding to list of transactions.");
@@ -209,32 +147,27 @@ pub fn update_user_with_transaction(id: u32, transaction: &Transaction) -> Updat
             return UpdateUserResult::Unprocessable(error_string);
         }
     };
+    let update_result = sqlx::query!(
+        "UPDATE users SET balance = $1, transactions_count = $2, last_transaction = $3, encoded_transactions = $4 WHERE id = $5",
+        user.balance,
+        user.transactions_count,
+        user.last_transaction,
+        transaction::encode_transactions(&user.transactions),
+        id
+    ).execute(&mut *postgres_transaction).await;
 
-    // serialize updated user
-    let serialized_user = match bincode::serialize(&user) {
-        Ok(serialized_user) => serialized_user,
-        Err(e) => {
-            let error_string = format!("Error serializing user: {}", e);
-            return UpdateUserResult::InternalError(error_string);
-        }
-    };
-
-    // move to start of file
-    match buff_reader.seek(std::io::SeekFrom::Start(0)) {
+    match update_result {
         Ok(_) => {}
         Err(e) => {
-            let error_string = format!("Error seeking to start of file: {}", e);
+            let error_string = format!("Error updating user: {}", e);
             return UpdateUserResult::InternalError(error_string);
         }
     };
-    // write updated user to file
-    match buff_writer.write_all(&serialized_user) {
-        Ok(()) => {}
+    return match postgres_transaction.commit().await {
+        Ok(()) => UpdateUserResult::Ok(user),
         Err(e) => {
-            let error_string = format!("Error writing to file: {}", e);
+            let error_string = format!("Error committing transaction: {}", e);
             return UpdateUserResult::InternalError(error_string);
         }
-    }
-
-    return UpdateUserResult::Ok(user);
+    };
 }

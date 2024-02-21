@@ -1,11 +1,14 @@
-use crate::{db, responses::ResponseType, transaction::Transaction};
+use std::sync::Arc;
+
+use crate::{db, responses::ResponseType, transaction::Transaction, user::User};
 use serde::{Deserialize, Serialize};
+use sqlx::{Pool, Postgres};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct StatementResponseSaldo {
     total: i32,
     data_extrato: String,
-    limite: u32,
+    limite: i32,
 }
 
 #[derive(Serialize, Debug)]
@@ -15,7 +18,11 @@ pub struct StatementResponse<'a> {
     ultimas_transacoes: [Option<&'a Transaction>; 10],
 }
 
-pub fn get(request: &mut [u8; 512], request_size: usize) -> ResponseType {
+pub async fn get(
+    pool: Arc<Pool<Postgres>>,
+    request: &mut [u8; 512],
+    request_size: usize,
+) -> ResponseType {
     if request_size < 15 {
         return ResponseType::UnprocessableEntity;
     }
@@ -26,8 +33,16 @@ pub fn get(request: &mut [u8; 512], request_size: usize) -> ResponseType {
         }
     };
 
-    let user = match db::read_user(id) {
-        db::ReadUserResult::Ok(user) => user,
+    let mut user = User {
+        id,
+        balance_limit: 0,
+        balance: 0,
+        transactions_count: 0,
+        last_transaction: 0,
+        transactions: Default::default(),
+    };
+    match db::read_user(pool, id, &mut user).await {
+        db::ReadUserResult::Ok => {}
         db::ReadUserResult::NotFound => {
             return ResponseType::NotFound;
         }
@@ -43,9 +58,9 @@ pub fn get(request: &mut [u8; 512], request_size: usize) -> ResponseType {
 
     let statement_response = StatementResponse {
         saldo: StatementResponseSaldo {
-            total: user.total,
+            total: user.balance,
             data_extrato: formatted_datetime,
-            limite: user.limit,
+            limite: user.balance_limit,
         },
         ultimas_transacoes: ordered_transactions,
     };
@@ -60,15 +75,15 @@ pub fn get(request: &mut [u8; 512], request_size: usize) -> ResponseType {
     };
 }
 
-fn get_id(request: &[u8]) -> Option<u32> {
+fn get_id(request: &[u8]) -> Option<i32> {
     let first_separator = request[13];
     let maybe_id = request[14];
     let second_separator = request[15];
     if first_separator != b'/' || second_separator != b'/' || !maybe_id.is_ascii_digit() {
         return None;
     }
-    let id = u32::from(maybe_id);
-    let zero_ascii = u32::from(b'0');
+    let id = i32::from(maybe_id);
+    let zero_ascii = i32::from(b'0');
     return Some(id - zero_ascii);
 }
 

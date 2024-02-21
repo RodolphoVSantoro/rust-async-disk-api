@@ -39,8 +39,8 @@ pub async fn respond(mut stream: TcpStream, response: ResponseType) -> std::io::
             stream.write_all(response.as_bytes()).await
         }
         ResponseType::InternalServerError(error_string) => {
-            logging::log!("Internal server error {error_string}");
-            stream.write_all(INTERNAL_SERVER_ERROR).await
+            logging::error!("Internal server error {error_string}");
+            return stream.write_all(INTERNAL_SERVER_ERROR).await;
         }
         ResponseType::NotFound => {
             stream.write_all(NOT_FOUND).await

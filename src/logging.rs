@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-pub fn into_log_string(buffer: &[u8]) -> String {
+pub fn into_log_json(buffer: &[u8]) -> String {
     return String::from_utf8_lossy(buffer)
         .replace('\n', "\\n")
         .replace('\r', "\\r")
@@ -18,6 +18,16 @@ pub fn get_enable_log() -> &'static bool {
     });
 }
 
+pub fn get_enable_log_error() -> &'static bool {
+    static INIT: OnceLock<bool> = OnceLock::new();
+    return INIT.get_or_init(|| {
+        return match std::env::var("ENABLE_ERROR_LOG") {
+            Ok(val) => val != "false" && val != "0",
+            Err(_) => true,
+        };
+    });
+}
+
 macro_rules! log {
     ($($arg:expr),*) => {
         if *crate::logging::get_enable_log() {
@@ -26,4 +36,13 @@ macro_rules! log {
     };
 }
 
+macro_rules! error {
+    ($($arg:expr),*) => {
+        if *crate::logging::get_enable_log_error() {
+            println!($($arg),*);
+        }
+    };
+}
+
+pub(crate) use error;
 pub(crate) use log;
