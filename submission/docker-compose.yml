@@ -3,9 +3,7 @@ version: "3.8"
 services:
   api1: &app1
     command: "./rust-async-disk-api 3000 resetDb"
-    build:
-      context: .
-      dockerfile: ./Dockerfile
+    image: rodolphovs/rinha-rust-2024-q1
     hostname: api1
     network_mode: host
     deploy:
